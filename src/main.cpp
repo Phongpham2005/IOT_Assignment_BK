@@ -19,9 +19,20 @@ void setup()
   Serial.begin(115200);
   check_info_File(0);
 
-  xTaskCreate(led_blinky, "Task LED Blink", 2048, NULL, 2, NULL);
-  xTaskCreate(neo_blinky, "Task NEO Blink", 2048, NULL, 2, NULL);
-  xTaskCreate(temp_humi_monitor, "Task TEMP HUMI Monitor", 2048, NULL, 2, NULL);
+  // 1. Dynamically allocate the shared System Data structure in heap memory
+  SystemData_t *sharedData = (SystemData_t *)malloc(sizeof(SystemData_t));
+  sharedData->temperature = 0.0f;
+  sharedData->humidity = 0.0f;
+
+  // 2. Initialize RTOS Sync Primitives
+  sharedData->dataMutex    = xSemaphoreCreateMutex();
+  sharedData->ledSemaphore = xSemaphoreCreateBinary();
+  sharedData->neoSemaphore = xSemaphoreCreateBinary();
+  sharedData->lcdSemaphore = xSemaphoreCreateBinary();
+
+  xTaskCreate(led_blinky, "Task LED Blink", 2048, (void *)sharedData, 2, NULL);
+  xTaskCreate(neo_blinky, "Task NEO Blink", 2048, (void *)sharedData, 2, NULL);
+  xTaskCreate(temp_humi_monitor, "Task TEMP HUMI Monitor", 4096, (void *)sharedData, 2, NULL);
   // xTaskCreate(main_server_task, "Task Main Server" ,8192  ,NULL  ,2 , NULL);
   // xTaskCreate( tiny_ml_task, "Tiny ML Task" ,2048  ,NULL  ,2 , NULL);
   xTaskCreate(coreiot_task, "CoreIOT Task" ,4096  ,NULL  ,2 , NULL);

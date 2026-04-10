@@ -87,6 +87,15 @@ void temp_humi_monitor(void *pvParameters){
                     lcd.setCursor(0, 0);
                     lcd.print("TEMP TOO HOT");
                 }
+            } else if (humidity_yellow_zone && temperature_red_zone) {
+                alternate_message = !alternate_message;
+                if (alternate_message) {
+                    lcd.setCursor(0, 0);
+                    lcd.print("HUMID TOO LOW");
+                } else {
+                    lcd.setCursor(0, 0);
+                    lcd.print("TEMP TOO HOT");
+                }
             } else if (humidity_blue_zone) {
                 lcd.setCursor(0, 0);
                 lcd.print("HUMID TOO HIGH");

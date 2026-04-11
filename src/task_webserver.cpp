@@ -1,6 +1,7 @@
 #include "task_webserver.h"
 
-AsyncWebServer server(80);
+// Đổi sang cổng 81 để không đụng chạm với WebServer của mainserver (cổng 80)
+AsyncWebServer asyncServer(81);
 AsyncWebSocket ws("/ws");
 
 bool webserver_isrunning = false;
@@ -45,22 +46,17 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
 void connnectWSV()
 {
     ws.onEvent(onEvent);
-    server.addHandler(&ws);
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/index.html", "text/html"); });
-    server.on("/script.js", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/script.js", "application/javascript"); });
-    server.on("/styles.css", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/styles.css", "text/css"); });
-    server.begin();
-    ElegantOTA.begin(&server);
+    asyncServer.addHandler(&ws);
+    // Remove static handlers that conflict with mainserver.cpp and cause File Not Found errors
+    asyncServer.begin();
+    ElegantOTA.begin(&asyncServer);
     webserver_isrunning = true;
 }
 
 void Webserver_stop()
 {
     ws.closeAll();
-    server.end();
+    asyncServer.end();
     webserver_isrunning = false;
 }
 

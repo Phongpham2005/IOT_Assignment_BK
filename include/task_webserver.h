@@ -9,7 +9,7 @@
 #include <ElegantOTA.h>
 #include <task_handler.h>
 
-extern AsyncWebServer server;
+// extern AsyncWebServer server;
 extern AsyncWebSocket ws;
 
 void Webserver_stop();

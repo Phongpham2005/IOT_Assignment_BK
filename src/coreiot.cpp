@@ -1,8 +1,8 @@
 #include "coreiot.h"
 
 // ----------- CONFIGURE THESE! -----------
-const char* coreIOT_Server = "10.235.76.226";  
-const char* coreIOT_Token = "g7drm1amhd3dchr379xu";   // Device Access Token
+const char* coreIOT_Server = "app.coreiot.io";
+const char* coreIOT_Token = "mioermbgdwqftctiyr8c";   // Device Access Token
 const int   mqttPort = 1883;
 // ----------------------------------------
 
@@ -19,7 +19,10 @@ void reconnect() {
     String clientId = "ESP32Client-";
     clientId += String(random(0xffff), HEX);
 
-    if (client.connect(clientId.c_str())) {
+    // Dùng Token do người dùng cài đặt hoặc mặc định nếu trống
+    String useToken = CORE_IOT_TOKEN.isEmpty() ? String(coreIOT_Token) : CORE_IOT_TOKEN;
+
+    if (client.connect(clientId.c_str(), useToken.c_str(), NULL)) {
         
       Serial.println("connected to CoreIOT Server!");
       client.subscribe("v1/devices/me/rpc/request/+");
@@ -58,39 +61,51 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
 
   const char* method = doc["method"];
-  if (strcmp(method, "setStateLED") == 0) {
-    // Check params type (could be boolean, int, or string according to your RPC)
-    // Example: {"method": "setValueLED", "params": "ON"}
-    const char* params = doc["params"];
+  // App.coreiot (ThingsBoard) switches truyền kiểu bool: {"method":"setNeoLED","params":true}
+  bool params = doc["params"] | false; 
 
-    if (strcmp(params, "ON") == 0) {
-      Serial.println("Device turned ON.");
-      //TODO
-
-    } else {   
-      Serial.println("Device turned OFF.");
-      //TODO
-
+  if (strcmp(method, "setNeoLED") == 0) {
+    neo_enabled = params;
+    Serial.printf("RPC setNeoLED: %s\n", params ? "ON" : "OFF");
+  } 
+  else if (strcmp(method, "setBlinkyLED") == 0) {
+    blinky_enabled = params;
+    Serial.printf("RPC setBlinkyLED: %s\n", params ? "ON" : "OFF");
+  } 
+  else if (strcmp(method, "setFanAuto") == 0) {
+    fan_auto_mode = params;
+    Serial.printf("RPC setFanAuto: %s\n", params ? "AUTO" : "MANUAL");
+  } 
+  else if (strcmp(method, "setFanState") == 0) {
+    if (!fan_auto_mode) {
+      fan_state = params;
+      digitalWrite(FAN_PIN, fan_state ? HIGH : LOW);
+      Serial.printf("RPC setFanState (Manual): %s\n", params ? "ON" : "OFF");
+    } else {
+      Serial.println("RPC setFanState: Ignored (System is in Auto mode)");
     }
-  } else {
+  } 
+  else {
     Serial.print("Unknown method: ");
     Serial.println(method);
+    return;
+  }
+
+  // Cần publish response ngược lại để công tắc trên CoreIoT app không bị treo (Time out)
+  // Request dạng: v1/devices/me/rpc/request/{request_id}
+  String topicStr = String(topic);
+  int lastSlash = topicStr.lastIndexOf("/");
+  if (lastSlash > 0) {
+    String reqId = topicStr.substring(lastSlash + 1);
+    String respTopic = "v1/devices/me/rpc/response/" + reqId;
+    client.publish(respTopic.c_str(), "{\"status\":\"ok\"}");
   }
 }
 
 
-void setup_coreiot(){
-
-  //Serial.print("Connecting to WiFi...");
-  //WiFi.begin(wifi_ssid, wifi_password);
-  //while (WiFi.status() != WL_CONNECTED) {
-  
-  // while (isWifiConnected == false) {
-  //   delay(500);
-  //   Serial.print(".");
-  // }
-
-  while(1){
+void setup_coreiot() {
+  // Đợi cho đến khi WiFi kết nối thành công (semaphore từ mainserver)
+  while (1) {
     if (xSemaphoreTake(xBinarySemaphoreInternet, portMAX_DELAY)) {
       break;
     }
@@ -98,12 +113,25 @@ void setup_coreiot(){
     Serial.print(".");
   }
 
+  Serial.println(" WiFi Connected! Setting up MQTT...");
 
-  Serial.println(" Connected!");
+  static char mqttServer[128];
+  if (CORE_IOT_SERVER.isEmpty()) {
+    strncpy(mqttServer, coreIOT_Server, sizeof(mqttServer) - 1);
+  } else {
+    strncpy(mqttServer, CORE_IOT_SERVER.c_str(), sizeof(mqttServer) - 1);
+  }
+  mqttServer[sizeof(mqttServer) - 1] = '\0';
 
-  client.setServer(CORE_IOT_SERVER.c_str(), CORE_IOT_PORT.toInt());
+  int usePort = CORE_IOT_PORT.isEmpty() ? mqttPort : CORE_IOT_PORT.toInt();
+
+  Serial.print("MQTT Connect to: ");
+  Serial.print(mqttServer);
+  Serial.print(":");
+  Serial.println(usePort);
+
+  client.setServer(mqttServer, usePort);
   client.setCallback(callback);
-
 }
 
 void coreiot_task(void *pvParameters){
@@ -117,14 +145,19 @@ void coreiot_task(void *pvParameters){
         }
         client.loop();
 
-        // Sample payload, publish to 'v1/devices/me/telemetry'
-        String payload = "{\"temperature\":" + String(glob_temperature) +  ",\"humidity\":" + String(glob_humidity) + "}";
+        // Thu thập toàn bộ telemetry
+        String payload = "{";
+        payload += "\"temperature\":" + String(glob_temperature) + ",";
+        payload += "\"humidity\":" + String(glob_humidity) + ",";
+        payload += "\"neo\":" + String(neo_enabled ? "true" : "false") + ",";
+        payload += "\"blinky\":" + String(blinky_enabled ? "true" : "false") + ",";
+        payload += "\"fanAuto\":" + String(fan_auto_mode ? "true" : "false") + ",";
+        payload += "\"fanOn\":" + String(fan_state ? "true" : "false");
+        payload += "}";
         
         client.publish("v1/devices/me/telemetry", payload.c_str());
-
-
         
-        Serial.println("Published payload: " + payload);
-        vTaskDelay(10000);  // Publish every 10 seconds
+        Serial.println("Published telemetry: " + payload);
+        vTaskDelay(6000 / portTICK_PERIOD_MS);  // Publish every 6 seconds
     }
 }
